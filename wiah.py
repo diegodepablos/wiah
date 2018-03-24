@@ -2,6 +2,7 @@
 
 # imports
 import subprocess, httplib, urllib, os
+from qhue import Bridge
 
 #config
 cfg = os.path.dirname(os.path.abspath(__file__)) + "/.connected"
@@ -12,13 +13,25 @@ family = [
 connected = []
 pushtoken 	= ""
 pushuser 	= ""
+maxattemps 	= 5
 
 #Custom functions
-def sendnotification(connected, member):
+def loadconnected():
+	with open(cfg, 'r') as file:
+		for line in file:
+			connected.append(line.strip().rsplit("#"))
+
+def saveconnected():
+	with open(cfg, 'w') as file:
+		for (mac,attempts) in connected:			
+			file.write(mac.upper() + '#' + str(attempts) + '\n')
+
+def sendnotification(connected, member):	
 	message = "%s has left home" % member
 	if connected:
 		message = "%s has arrived home" % member
-
+		
+	#Pushover integration
 	conn = httplib.HTTPSConnection("api.pushover.net:443")
 	conn.request("POST", "/1/messages.json",
   	urllib.urlencode({
@@ -28,16 +41,10 @@ def sendnotification(connected, member):
   			}), { "Content-type": "application/x-www-form-urlencoded" })
 	conn.getresponse()
 
-#main
-#print "Who Is At Home?"
-#print "="*20
+################# MAIN #####################################
 
 #read cfg
-with open(cfg, 'r') as file:
-	for line in file:
-		connected.append(line.strip())
-
-#print connected
+loadconnected()
 
 scan = subprocess.Popen(["arp-scan", "-lq", "-r", "5"], stdout=subprocess.PIPE)
 grep = subprocess.Popen(["grep", "-io", "[0-9A-F]\{2\}\(:[0-9A-F]\{2\}\)\{5\}"], stdin=scan.stdout, stdout=subprocess.PIPE)
@@ -45,8 +52,6 @@ grep = subprocess.Popen(["grep", "-io", "[0-9A-F]\{2\}\(:[0-9A-F]\{2\}\)\{5\}"],
 # Allow scan to receive a SIGPIPE if grep exits
 scan.stdout.close()
 output = grep.communicate()
-
-#print output
 
 for (mac,member) in family:
 	#print "Checking if %s is connected" % member
@@ -59,19 +64,30 @@ for (mac,member) in family:
 				if cmac.upper()==mac.upper():
 					#print "%s is connected" % member
 					success = True
-					if len(connected)==0 or (not (any(mac.upper() in s for s in connected) or all(mac.upper() in s for s in connected))):
-						connected.append(mac.upper())
+					found = False
+					for (omac, attemps) in connected:
+						if omac.upper()==mac.upper():
+							#already connected
+							found = True
+							#reset counter
+							connected = [i for i in connected if i[0] != mac.upper()]
+							connected.append((mac.upper(), 0))
+							break
+					if not found:
+						connected.append((mac.upper(), 0))
 						sendnotification(True, member)					
 					break
 			if not success:
 				#print "%s is NOT connected" % member
-				#remove from connected
-				if len(connected)>0 and (any(mac.upper() in s for s in connected) or all(mac.upper() in s for s in connected)):
-					connected.remove(mac.upper())
-					sendnotification(False, member)
-		
+				for (omac, attemps) in connected:
+					if omac.upper()==mac.upper():												
+						if int(attemps) > maxattemps:
+							#remove from connected
+							connected = [i for i in connected if i[0] != mac.upper()]							
+							sendnotification(False, member)	
+						else:
+							connected = [i for i in connected if i[0] != mac.upper()]	
+							connected.append((mac.upper(), int(attemps)+1))
 						
 #save results to file
-with open(cfg, 'w') as file:
-	for mac in connected:
-		file.write(mac.upper() + '\n')
+saveconnected()
