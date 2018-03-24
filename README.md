@@ -14,7 +14,7 @@ A little python script that checks if any family member is at home or not, writt
 
     sudo chmod +x wiah.py
 
-4. Add a crontab to execute the script every five minutes (*/5 * * * *). This script requires elevation privileges (root):
+4. Add a crontab to execute the script every minute (* * * * *). This script requires elevation privileges (root):
   
     sudo crontab -e -u root
   
